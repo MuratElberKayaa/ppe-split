@@ -8,6 +8,15 @@
   validate-gt GT.json...               ppe-eval-video/1 doğrulama
   example-gt                           sentetik şema örneği
 
+  FAZ 10-A.3 veri hattı (model/GPU kullanmaz; ham veriyi değiştirmez):
+  data-validate MANIFEST [--out DIR]   ppe-dataset-manifest/1 + etiket doğrulama -> report.json/.md
+                                       çıkış kodu: 0 PASS, 1 FAIL, 2 BLOCKED
+  data-manifest --root R --items I.json --dataset-id ID --dataset-version X.Y.Z --created-at T
+                --classification C --group-by K --seed S [--assign-splits] [--freeze ROL] --out M.json
+  data-agreement A.json B.json         iki etiketleyici uyumu (kutu ve durum ayrı; otomatik karar yok)
+  data-convert ANN.json --split S --out EVAL.json   ppe-annotation/1 -> ppe-eval-video/1
+  data-fixtures --out DIR [--scenario AD]           SENTETİK örnek veri kümesi (gerçek veri değildir)
+
 Çıktılar: evaluation/output/<UTC>_<komut>/ (Git dışı). Üretim eşikleri DEĞİŞTİRİLMEZ; tümü detector.py/.env/ppe_core
 değerlerinden okunur. Ultralytics telemetrisi bu süreçte YOLO_OFFLINE=1 ile kapatılır."""
 import argparse
@@ -369,6 +378,98 @@ def cmd_example_gt(a):
     return 0
 
 
+def cmd_data_validate(a):
+    from . import datamanifest as dm
+    mpath = Path(a.manifest)
+    root = Path(a.root) if a.root else mpath.parent
+    try:
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"HATA: manifest okunamadı ({type(exc).__name__})")
+        return 1
+    rep = dm.validate_dataset(root, manifest, max_hamming=a.max_hamming)
+    out = Path(a.out) if a.out else _out_dir("data_validate")
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "report.json").write_text(dm.render_json(rep), encoding="utf-8")
+    (out / "report.md").write_text(dm.render_markdown(rep), encoding="utf-8")
+    if a.record:
+        Path(a.record).write_text(json.dumps(dm.attach_validation(manifest, rep), ensure_ascii=False, indent=1,
+                                             sort_keys=True), encoding="utf-8")
+    print(f"{rep['dataset_id']} {rep['dataset_version']}: {rep['status']} (gerçek saha veri kümesi: "
+          f"{rep['real_site_dataset']}) — hata {rep['counts']['errors']}, engel {rep['counts']['blockers']}, "
+          f"uyarı {rep['counts']['warnings']}")
+    for r in (rep["errors"] + rep["blockers"])[:20]:
+        print(f"  {r['code']:<24} {r['where']}: {r['msg']}")
+    print("rapor:", out)
+    return {"PASS": 0, "FAIL": 1, "BLOCKED": 2}[rep["status"]]
+
+
+def cmd_data_manifest(a):
+    from . import datamanifest as dm
+    root = Path(a.root)
+    items = json.loads(Path(a.items).read_text(encoding="utf-8"))
+    ratios = dict(zip(dm.SPLITS, (float(x) for x in a.ratios.split(","))))
+    policy = {"group_by": a.group_by, "seed": a.seed, "ratios": ratios}
+    if a.assign_splits:
+        entries = []
+        for it in items:
+            p, why = dm.safe_path(root, it["annotation_path"])
+            if p is None:
+                print(f"HATA: {it.get('media_id')}: {why}")
+                return 1
+            m = json.loads(p.read_text(encoding="utf-8")).get("media") or {}
+            entries.append({"media_id": it["media_id"], a.group_by: m.get(a.group_by)})
+        assignment = dm.assign_splits(entries, group_by=a.group_by, seed=a.seed, ratios=ratios)
+        for it in items:
+            it["split"] = assignment[it["media_id"]]
+    man = dm.build_manifest(root, items, dataset_id=a.dataset_id, dataset_version=a.dataset_version,
+                            created_at=a.created_at, data_classification=a.classification, split_policy=policy,
+                            description=a.description)
+    if a.freeze:
+        man = dm.freeze_test(man, frozen_at=a.created_at, approved_by_role=a.freeze)
+    Path(a.out).write_text(json.dumps(man, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+    print(f"manifest: {a.out} ({len(man['items'])} kayıt, içerik {man['content_sha256'][:12]}…, "
+          f"test dondurma: {man['test_freeze'].get('frozen')})")
+    return 0
+
+
+def cmd_data_agreement(a):
+    from .agreement import compare
+    res = compare(json.loads(Path(a.a).read_text(encoding="utf-8")), json.loads(Path(a.b).read_text(encoding="utf-8")),
+                  iou_thr=a.iou)
+    text = json.dumps(res, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+    if a.out:
+        Path(a.out).write_text(text, encoding="utf-8")
+    print(text if not a.out else f"uyum raporu: {a.out} ({res['resolution']})")
+    return 0
+
+
+def cmd_data_convert(a):
+    from .datacontract import to_eval_video
+    try:
+        doc = to_eval_video(json.loads(Path(a.annotation).read_text(encoding="utf-8")), a.split)
+    except ValueError as exc:
+        print("HATA:", exc)
+        return 1
+    Path(a.out).write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("ppe-eval-video/1:", a.out)
+    return 0
+
+
+def cmd_data_fixtures(a):
+    from . import fixtures
+    out = Path(a.out)
+    if out.exists() and any(out.iterdir()):
+        print("HATA: hedef dizin boş olmalı (mevcut dosyaların üzerine yazılmaz)")
+        return 1
+    if a.scenario not in fixtures.all_scenarios():
+        print("HATA: bilinmeyen senaryo; seçenekler:", ", ".join(fixtures.all_scenarios()))
+        return 1
+    man, status, _ = fixtures.build_scenario(a.scenario, out)
+    print(f"SENTETİK fikstür '{a.scenario}' yazıldı: {out} (beklenen doğrulama durumu {status}; gerçek veri değildir)")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m evaluation", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -401,6 +502,43 @@ def main(argv=None):
     p.add_argument("files", nargs="+")
     p.set_defaults(fn=cmd_validate_gt)
     sub.add_parser("example-gt").set_defaults(fn=cmd_example_gt)
+    p = sub.add_parser("data-validate")
+    p.add_argument("manifest")
+    p.add_argument("--root", help="veri kökü (varsayılan: manifest dizini)")
+    p.add_argument("--out")
+    p.add_argument("--max-hamming", type=int, default=4)
+    p.add_argument("--record", help="doğrulama sonucunu ekleyerek manifest kopyasını bu yola yaz")
+    p.set_defaults(fn=cmd_data_validate)
+    p = sub.add_parser("data-manifest")
+    p.add_argument("--root", required=True)
+    p.add_argument("--items", required=True)
+    p.add_argument("--dataset-id", required=True)
+    p.add_argument("--dataset-version", required=True)
+    p.add_argument("--created-at", required=True, help="UTC ISO-8601, ör. 2026-11-02T00:00:00Z (deterministik)")
+    p.add_argument("--classification", required=True, choices=["SYNTHETIC", "PERSONAL_DATA", "LICENSED_PUBLIC"])
+    p.add_argument("--group-by", required=True, choices=["site_id", "camera_id", "session_id", "source_video_id"])
+    p.add_argument("--seed", required=True)
+    p.add_argument("--ratios", default="0.7,0.15,0.15", help="train,val,test")
+    p.add_argument("--assign-splits", action="store_true")
+    p.add_argument("--freeze", metavar="ONAYLAYAN_ROL", help="test kümesini dondur")
+    p.add_argument("--description", default="")
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_data_manifest)
+    p = sub.add_parser("data-agreement")
+    p.add_argument("a")
+    p.add_argument("b")
+    p.add_argument("--iou", type=float, default=0.5)
+    p.add_argument("--out")
+    p.set_defaults(fn=cmd_data_agreement)
+    p = sub.add_parser("data-convert")
+    p.add_argument("annotation")
+    p.add_argument("--split", required=True, choices=["train", "val", "test"])
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_data_convert)
+    p = sub.add_parser("data-fixtures")
+    p.add_argument("--out", required=True)
+    p.add_argument("--scenario", default="valid")
+    p.set_defaults(fn=cmd_data_fixtures)
     a = ap.parse_args(argv)
     return a.fn(a)
 
