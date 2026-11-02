@@ -68,3 +68,41 @@ servisini çalıştırarak rolleri ve sahiplikleri yeniden kurar.
 
 Veriler `ppe-split_pgdata` volume'undadır. `docker compose down -v` ve `docker volume prune` bu volume'u **siler**;
 kullanmayın. `docker compose down` (–v olmadan) güvenlidir.
+
+## Yedek şifreleme (FAZ 10-A.1 — TASARIM; uygulanmadı, karar bekliyor)
+
+Durum: `backups/ppe-<UTC>/` düz `pg_dump` + snapshot JPEG'leri içerir (kişisel veri: yüz/vücut görüntüsü, kamera,
+zaman). Klasör izinleri daraltılmadıkça (bkz. `scripts/windows_acl.ps1`) ve disk şifrelemesi (BitLocker)
+doğrulanmadıkça aynı bilgisayardaki diğer yerel kullanıcılar okuyabilir.
+
+**Önerilen yöntem: açık anahtarlı şifreleme (`age`, X25519).** Saha bilgisayarı yalnız **alıcı (açık) anahtarı**
+bilir; yedeği şifreleyebilir ama **çözemez**. Bilgisayar ele geçirilse bile eski yedekler okunamaz ve otomasyon için
+makinede parola/anahtar saklanması gerekmez. (Alternatif: 7-Zip AES-256 parola — Windows'ta kolay, ama otomatik
+yedek için parolanın makinede durması gerekir; önerilmez.) Araç seçimi ve lisansı (age: BSD-3) proje sahibince onaylanır.
+
+Akış (uygulanırsa `scripts/backup.py --encrypt-to <alıcı-dosyası>` olarak):
+1. Mevcut yedek üretilir ve `SHA256SUMS` yazılır (değişmez).
+2. Klasör tek arşive alınır ve şifrelenir: `ppe-<UTC>.tar.age`; şifreli dosyanın SHA-256'sı ayrı yazılır.
+3. Düz klasör **yalnız** şifreli dosya diske tam yazılıp özeti doğrulandıktan sonra kaldırılır (bayrakla; varsayılan
+   kaldırmamak). Şifreli yedekler başka bir ortama (harici disk / ağ paylaşımı) kopyalanabilir.
+
+Anahtar yönetimi:
+- Özel anahtar (`age-keygen` çıktısı) **saha bilgisayarında tutulmaz**; Git'e, log'a, rapora, `.env`'e yazılmaz.
+- İki kopya: (a) veri sorumlusunun belirlediği kişi — parola yöneticisi / şifreli USB, kasada; (b) yedek emanet
+  (BT sorumlusu). İkisi de kaybolursa **yedekler kalıcı olarak geri alınamaz** — emanet zorunludur.
+- Makinede yalnız açık anahtar (`age1…`) durur; gizli değildir ama değiştirilmesi saldırganın yeni yedekleri kendi
+  anahtarına yönlendirmesi demektir → dosya ACL ile korunur ve özeti kurulum kaydında tutulur.
+- Rotasyon: yılda bir veya anahtar sahibi değiştiğinde yeni anahtar çifti; eski özel anahtar, onunla şifrelenmiş son
+  yedeğin saklama süresi (KVKK saklama/imha politikası) dolana kadar saklanır, sonra imha edilir ve kayda geçer.
+
+Geri yükleme (şifreli):
+1. Şifreli dosya ve özeti, özel anahtarın bulunduğu **güvenli bilgisayara** kopyalanır; özet doğrulanır.
+2. `age -d -i <özel-anahtar> -o ppe-<UTC>.tar ppe-<UTC>.tar.age` → arşiv açılır → `SHA256SUMS` doğrulanır.
+3. `python scripts/restore_check.py <klasör>` (izole doğrulama), ardından gerekiyorsa yukarıdaki "Ana veritabanına
+   geri yükleme" adımları. Açılmış düz kopya iş bitince silinir.
+4. **Tatbikat:** her anahtar rotasyonunda ve en az 3 ayda bir, anahtar sahibiyle izole geri yükleme yapılır ve
+   sonucu kaydedilir (anahtar erişilebilirliğinin tek kanıtı budur).
+
+Disk şifrelemesi bu tasarımın yerine geçmez, tamamlar: canlı veri (Docker Desktop disk imajındaki PostgreSQL
+volume'u, `data/snapshots`, dedektör outbox'ı) şifreli disk (BitLocker) üzerinde olmalıdır. BitLocker durumu
+yönetici yetkisiyle doğrulanır: `manage-bde -status C:` (yönetici PowerShell).

@@ -20,7 +20,8 @@ COMPOSE = HERE / "docker-compose.reliability.yml"
 ENV_FILE = OUT / "rel.env"
 PROJECT = "ppe-rel"
 DETECTOR = ROOT / "detector"
-PY = DETECTOR / ".venv" / "Scripts" / "python.exe"
+# REL_DETECTOR_PY: dedektörü başka (ör. izole güvenlik testi) venv'iyle koşturmak için
+PY = Path(os.getenv("REL_DETECTOR_PY", DETECTOR / ".venv" / "Scripts" / "python.exe"))
 if not PY.exists():
     PY = Path(sys.executable)
 VIDEOS = {"V1": DETECTOR / "videos" / "16533594_1920_1080_25fps.mp4",
@@ -163,11 +164,20 @@ def detector_env(outbox_dir: Path, *, stride=2, token=None, url=None, extra=None
     return out
 
 
+# Ayrı süreç grubu + zarif durdurma. Windows: CTRL_BREAK (SIGBREAK -> KeyboardInterrupt); POSIX (FAZ 10-A.1, macOS'ta
+# GPU'suz bellek testi): yeni oturum + SIGINT (KeyboardInterrupt). Sinyal yalnız bu araçların başlattığı PID'e gider.
+NEW_GROUP = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True})
+
+
+def interrupt(pid: int) -> None:
+    os.kill(pid, signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
+
+
 def start_detector(sources: list[str], outbox_dir: Path, log: Path, **kw) -> subprocess.Popen:
     """Gerçek detector.py (main) — ayrı süreç grubu; CTRL_BREAK ile zarif durdurulabilir (Ctrl+C yolu)."""
     f = open(log, "a", encoding="utf-8")
     return subprocess.Popen([str(PY), str(LAUNCHER), *sources], cwd=DETECTOR, env=detector_env(outbox_dir, **kw),
-                            stdout=f, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                            stdout=f, stderr=subprocess.STDOUT, **NEW_GROUP)
 
 
 def stop_detector(p: subprocess.Popen, timeout=40) -> dict:
@@ -175,7 +185,7 @@ def stop_detector(p: subprocess.Popen, timeout=40) -> dict:
     t0 = time.monotonic()
     if p.poll() is None:
         try:
-            os.kill(p.pid, signal.CTRL_BREAK_EVENT)
+            interrupt(p.pid)
         except OSError:
             pass
         try:
@@ -188,7 +198,14 @@ def stop_detector(p: subprocess.Popen, timeout=40) -> dict:
 
 
 def kill_tree(pid: int) -> None:
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        return
+    try:                                   # NEW_GROUP ile başlatılan süreç kendi grubunun lideridir; değilse dokunma
+        if os.getpgid(pid) == pid:
+            os.killpg(pid, signal.SIGKILL)
+    except OSError:
+        pass
 
 
 def child_pids(pid: int) -> list[int]:
