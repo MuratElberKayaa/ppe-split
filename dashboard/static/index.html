@@ -29,7 +29,7 @@
 
   header {
     background: var(--hivis); color: #17202a; padding: 10px 20px;
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap;
     border-bottom: 4px solid #17202a;
   }
   header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .2px; }
@@ -45,33 +45,35 @@
   #conn.err i { background: var(--bad); }
 
   main {
-    display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px;
     padding: 16px 20px; max-width: 1800px; margin: 0 auto;
   }
-  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
 
-  /* kamera ızgarası */
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
+  /* kamera ızgarası (FAZ 10-A.7): en fazla bir kamera büyütülür; büyüyen kamera ilk sıraya ve tam satıra geçer, diğer
+     kartlar kendi sıralarını korur (boşluk kalmaz). Görüntü en-boy oranını korur (contain), kırpılmaz/esnemez. */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px; align-items: start; }
   .hint { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 8px; }
-  .stage { background: #000; position: relative; border: 3px solid transparent; transition: border-color .2s; cursor: pointer; }
-  .stage.wide { grid-column: 1 / -1; }
+  .stage { background: var(--panel); border: 3px solid var(--line); min-width: 0; display: flex; flex-direction: column; transition: border-color .2s; }
+  .stage.wide { grid-column: 1 / -1; order: -1; }
   .stage.alarm { border-color: var(--bad); }
+  .stage .cap { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; min-width: 0; }
+  .stage .ttl { flex: 1 1 auto; min-width: 0; }
+  .stage .cam-name, .stage .cam-state { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage .cam-name { font-size: 14px; font-weight: 700; }
+  .stage .cam-state { font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .stage .exp { flex: 0 0 auto; padding: 3px 9px; font-size: 12.5px; }
+  .stage .frame { position: relative; background: #0c0f12; cursor: zoom-in; }
+  .stage.wide .frame { cursor: zoom-out; }
   .stage img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #0c0f12; }
-  .stage.wide img { max-height: 78vh; }
+  .stage.wide img { max-height: min(72vh, 1100px); }
   .stage.off img { opacity: .35; }
-  .stage .tag {
-    position: absolute; left: 0; top: 0; background: rgba(23,32,42,.85); color: #fff;
-    font-size: 13px; padding: 4px 10px; font-variant-numeric: tabular-nums; max-width: 100%;
-  }
   .stage .badge {
-    position: absolute; right: 0; bottom: 0; background: var(--bad); color: #fff;
+    position: absolute; right: 0; top: 0; background: var(--bad); color: #fff;
     font-size: 13px; font-weight: 700; padding: 4px 10px;
   }
   .stage .badge:empty { display: none; }
-  .stage .health {
-    position: absolute; left: 0; bottom: 0; max-width: 70%; background: rgba(23,32,42,.85); color: #fff;
-    font-size: 12.5px; padding: 3px 9px;
-  }
+  .stage .health { background: #2b343c; color: #fff; font-size: 12.5px; padding: 4px 10px; overflow-wrap: anywhere; }
   .stage .health.warn { background: #8a5a00; }
   .stage .health.down { background: var(--bad); font-weight: 700; }
   .stage .health:empty { display: none; }
@@ -107,6 +109,7 @@
   #feed strong { font-size: 15px; display: block; }
   #feed small { color: var(--ink-soft); font-size: 12.5px; display: block; margin-top: 2px; }
   #feed .live-line { color: var(--warn); }
+  @media (max-width: 1000px) { #feed { max-height: 70vh; } }
   button { font: inherit; font-size: 13px; padding: 5px 10px; background: transparent; color: var(--ink); border: 1px solid var(--ink); cursor: pointer; }
   button:hover { background: var(--hivis); color: #17202a; }
   button:focus-visible, img:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
@@ -181,7 +184,7 @@
 </head>
 <body>
 <header>
-  <h1>Saha KKD İzleme: baret ve yelek</h1>
+  <h1>Saha KKD İzleme</h1>
   <div class="hdr-right">
     <div id="conn"><i></i><span id="connText">Bağlanıyor…</span></div>
     <div id="userBox" hidden><span id="userName"></span><button type="button" id="logout">Çıkış</button></div>
@@ -210,7 +213,7 @@
 
 <main id="view-live" role="tabpanel" aria-labelledby="tab-live" hidden>
   <section>
-    <p class="hint">Bir kameraya tıklayınca tam genişliğe büyür, tekrar tıklayınca küçülür.</p>
+    <p class="hint">Bir kameranın görüntüsüne veya "Büyüt" düğmesine basınca kamera ilk sıraya geçip büyür; tekrar basınca küçülür.</p>
     <div class="grid" id="grid">
       <div class="empty" id="gridEmpty">Dedektör bağlanınca kameralar burada görünür.</div>
     </div>
@@ -345,23 +348,49 @@ const byIdx = new Map();        // WebSocket indeksi -> tile
 
 function fmtT(s) { const m = Math.floor(s / 60); return `${m}:${(s % 60).toFixed(0).padStart(2, "0")}`; }
 
-/* ---------- kamera karoları ---------- */
+/* ---------- kamera karoları ----------
+   FAZ 10-A.7: en fazla bir kamera büyütülür (seçim karo güncellemelerinde ve sayfa yenilemesinde korunur). Büyütme
+   yalnız CSS sınıfıdır: WebSocket bağlantısı, kare akışı ve /api/state yoklama sıklığı değişmez. */
+let EXPANDED = null;
+try { EXPANDED = sessionStorage.getItem("ppe.expanded"); } catch (e) { /* depolama kapalı: yalnız bellekte */ }
+function setExpanded(id) {
+  EXPANDED = id;
+  try { if (id) sessionStorage.setItem("ppe.expanded", id); else sessionStorage.removeItem("ppe.expanded"); }
+  catch (e) { /* depolama kapalı */ }
+  tiles.forEach((t, cid) => {
+    const on = cid === id;
+    t.el.classList.toggle("wide", on);
+    t.exp.setAttribute("aria-pressed", String(on));
+    t.exp.textContent = on ? "Küçült" : "Büyüt";
+  });
+  const t = id && tiles.get(id);
+  if (t) t.el.scrollIntoView({ block: "nearest" });
+}
 function ensureTile(c) {
   let t = tiles.get(c.id);
   if (t) return t;
   $("gridEmpty").style.display = "none";
   const el = document.createElement("div");
   el.className = "stage";
+  const cap = document.createElement("div"); cap.className = "cap";
+  const ttl = document.createElement("div"); ttl.className = "ttl";
+  const name = document.createElement("span"); name.className = "cam-name";
+  const state = document.createElement("span"); state.className = "cam-state";
+  const exp = document.createElement("button");
+  exp.type = "button"; exp.className = "exp"; exp.textContent = "Büyüt"; exp.setAttribute("aria-pressed", "false");
+  ttl.append(name, state); cap.append(ttl, exp);
+  const frame = document.createElement("div"); frame.className = "frame";
   const img = document.createElement("img");
-  img.alt = `${c.name} canlı video`;
-  const tag = document.createElement("div"); tag.className = "tag";
   const badge = document.createElement("div"); badge.className = "badge";
-  const health = document.createElement("div"); health.className = "health";
-  el.append(img, tag, badge, health);
-  el.onclick = () => el.classList.toggle("wide");
+  frame.append(img, badge);
+  const health = document.createElement("div"); health.className = "health"; health.setAttribute("role", "status");
+  el.append(cap, frame, health);
+  exp.onclick = () => setExpanded(EXPANDED === c.id ? null : c.id);
+  frame.onclick = exp.onclick;
   $("grid").append(el);
-  t = { el, img, tag, badge, health, url: null };
+  t = { el, img, name, state, exp, badge, health, url: null };
   tiles.set(c.id, t); byIdx.set(c.idx, t);
+  if (EXPANDED === c.id) setExpanded(c.id);
   return t;
 }
 
@@ -394,9 +423,13 @@ function healthText(c) {
 function syncCam(c) {
   const t = ensureTile(c), m = c.meta, s = c.summary;
   const waiting = m.status === "waiting_for_detector";
-  t.tag.textContent = waiting ? `${c.name} · bekleniyor…`
-    : m.status === "reconnecting" ? `${c.name} · bağlantı yok`
-    : `${c.name} · video ${fmtT(s.t)} · ${m.width}×${m.height} · ${m.proc_fps} kare/sn`;
+  t.name.textContent = c.name; t.name.title = c.name;
+  t.img.alt = `${c.name} canlı video`;
+  t.exp.setAttribute("aria-label", `${c.name}: ${t.exp.textContent}`);
+  t.state.textContent = waiting ? "Dedektör bekleniyor…"
+    : m.status === "reconnecting" ? "Kamera bağlantısı yok"
+    : `video ${fmtT(s.t)} · ${m.width}×${m.height} · ${m.proc_fps} kare/sn`;
+  t.state.title = t.state.textContent;
   t.el.classList.toggle("alarm", s.viol > 0);
   t.el.classList.toggle("off", camDown(c));
   t.badge.textContent = s.viol > 0 ? `${s.viol} İHLAL` : "";
@@ -973,6 +1006,8 @@ function clearUserData() {         // önceki kullanıcının verisi (görüntü
   H.cursor = null; H.run = null; R.cursor = null; lastDaily = [];
   tiles.forEach(t => { if (t.url) URL.revokeObjectURL(t.url); t.el.remove(); });
   tiles.clear(); byIdx.clear(); $("gridEmpty").style.display = "";
+  EXPANDED = null;
+  try { sessionStorage.removeItem("ppe.expanded"); } catch (e) { /* depolama kapalı */ }
   clearFeed(); after = 0; total = 0; $("nTotal").textContent = "0";
   $("reportWrap").replaceChildren(el("div", { class: "empty", text: "Dedektör bir videoyu bitirince rapor oluşur." }));
   $("dlgImg").removeAttribute("src");
