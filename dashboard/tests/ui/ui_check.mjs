@@ -160,7 +160,7 @@ await check("Canlı İzleme (FAZ 9): izlenemeyen kamera ve değerlendirilemeyen 
       proc_fps: 1, source: "videos/x.mp4", ...meta }, summary: { t: 1, people: 2, ok: 0, viol: 0, analyzing: 2 }, people: [] }));
     assert((await fetch(FULL + "/ingest/frame", { method: "POST", body: fd })).ok, "kare gönderilemedi");
   };
-  const tile = `[...document.querySelectorAll("#grid .stage")].find(t => t.querySelector(".tag").textContent.startsWith("Canlı test"))`;
+  const tile = `[...document.querySelectorAll("#grid .stage")].find(t => t.querySelector(".cam-name").textContent.startsWith("Canlı test"))`;
   await post({ health: { state: "connected", flags: ["no_signal"], coverage: { visible: 0, analyzing: 0 } } });
   await waitFor(`(${tile})?.querySelector(".health").textContent.includes("izlenemiyor")`);
   const down = await ev(`const t = ${tile}; return { h: t.querySelector(".health").textContent, cls: t.querySelector(".health").className,

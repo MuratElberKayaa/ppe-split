@@ -45,6 +45,32 @@ Kapsam dışı kayıt **404** döner (varlığı açığa vurulmaz).
 `supervisor` bugün yazma işlemi yapmaz (arayüzde inceleme/onay işlevi yok); görüntü ve canlı yayın erişimi viewer'dan
 ayıran kişisel veri yetkisidir.
 
+### Kullanıcı (`user`) rolü ve model olasılıkları (FAZ 10-A.7)
+
+- **`user` = `supervisor`.** Operasyonel kullanıcının giriş adıdır: canlı izleme, kamera büyütme, uyarılar, ihlal
+  görüntüleri, geçmiş, run raporları, istatistikler, kamera sağlığı. Hesap/rol yönetimi ve denetim kaydı yoktur
+  (`/api/admin/*` → 403). CLI ve yönetici API'si `user` kabul eder, DB'ye `supervisor` yazar (`ck_app_users_role`
+  değişmedi, migration yok); arayüzde "Kullanıcı" görünür. Mevcut hesaplar dönüştürülmez.
+- **Model olasılıkları yalnız `admin`.** Bu sistemde model türevli tek sayısal değer, PPEMonitor'ün kayan penceredeki
+  baret/yelek eşleşme oranıdır (%). Bu oran olay ve geçmişte `helmet_rate`/`vest_rate`, canlı kişi ve run raporu
+  satırında `helmet`/`vest` olarak geçer. YOLO kişi güveni dashboard'a hiç gönderilmez. Filtre **sunucu yanıtında**
+  uygulanır (`AuthCtx.model_scores`, `/api/auth/me` → `permissions.model_scores`):
+
+  | Kanal | admin dışı rol |
+  |---|---|
+  | `/api/state` (kamera kişileri, uyarılar), `/api/alerts`, `/api/report` | izin listesiyle kurulur; oran alanı yok |
+  | `/api/history/incidents/{id}` (zaman çizelgesi), `/api/history/runs/{id}` (kişi satırları) | oran alanı yok |
+  | `/api/state` `meta` (serbest biçim) | olasılık/oran adlı anahtarlar çıkarılır (`low_conf` kapsam *sayısı* kalır) |
+  | `/ws`, `/video_feed/*` (JPEG) | dedektör oranı piksele yazmaz; karede yalnız kutu, iz ID ve durum var |
+  | `/snapshots/*` | kişi kırpıntısı çizimden önce alınır; üzerinde metin yok |
+
+  Karar alanları (durum, eksik ekipman, zaman, kimlikler) her rolde aynıdır; DB'deki özgün değer değişmez.
+  Canlı uyarılar her rolde izin listesiyle sunulur: dedektörün eklediği bilinmeyen alanlar (ör. ileride bir güven skoru
+  veya maskelenmemiş kaynak etiketi) tarayıcıya gitmez. Arayüz oran sütunlarını yalnız admin oturumunda çizer. Çıkışta
+  detay önbelleğini ve ekranları temizler; oturum değiştikten sonra gelen eski yanıtı yazmaz.
+- Testler: `dashboard/tests/test_role_visibility.py` (JSON içeriği rol bazında), `detector/tests/test_draw_overlay.py`,
+  gerçek tarayıcı `dashboard/tests/ui/ui_check_10a7.py` (+ `serve_live_fixture.py`, izole `_test` DB).
+
 ## Makine kimliği ve token rotasyonu
 
 Dedektör `X-Token` ile kimlik doğrular; token middleware'de gövde okunmadan denetlenir. Kesintisiz rotasyon

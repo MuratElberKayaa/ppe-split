@@ -17,8 +17,8 @@ curl http://127.0.0.1:8000/health/ready     # {"status":"ready",...,"revision":[
 
 # İlk yönetici (parola gizli sorulur; komut satırına yazılmaz). Web'den hesap oluşturulamaz.
 docker compose exec dashboard python -m auth.cli create admin --role admin
-# Diğer kullanıcılar (örnek): İSG sorumlusu yalnız iki kameraya
-docker compose exec dashboard python -m auth.cli create isg_ali --role supervisor --cameras giris,kule
+# Diğer kullanıcılar (örnek): operasyonel kullanıcı (user = supervisor; model olasılıklarını görmez), yalnız iki kameraya
+docker compose exec dashboard python -m auth.cli create isg_ali --role user --cameras giris,kule
 docker compose exec dashboard python -m auth.cli list
 
 cd detector
