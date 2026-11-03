@@ -16,6 +16,11 @@ from . import passwords
 
 ROLES = ("viewer", "supervisor", "admin")
 RANK = {r: i for i, r in enumerate(ROLES)}
+# FAZ 10-A.7: "user" (operasyonel kullanıcı: canlı izleme, uyarı, snapshot, geçmiş, rapor; hesap yönetimi ve model
+# olasılıkları YOK) mevcut supervisor rolünün giriş adıdır. DB'de 'supervisor' saklanır (ck_app_users_role; yeni rol
+# değeri migration gerektirir). Arayüzde "Kullanıcı" olarak gösterilir.
+ROLE_ALIASES = {"user": "supervisor"}
+ROLE_CHOICES = ROLES + tuple(ROLE_ALIASES)
 USERNAME_RE = re.compile(r"^[a-z0-9_.-]{3,64}$")
 CAMERA_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 U = AppUser.__table__
@@ -47,10 +52,13 @@ def normalize_scope(scope):
     return sorted(set(scope))
 
 
-def _role(role) -> str:
+def resolve_role(role) -> str:
+    """Giriş adını (ör. 'user') saklanan role çevirir; geçersizse StoreError."""
+    role = ROLE_ALIASES.get(role, role) if isinstance(role, str) else role
     if role not in ROLES:
-        raise StoreError(f"rol şunlardan biri olmalı: {', '.join(ROLES)}")
+        raise StoreError(f"rol şunlardan biri olmalı: {', '.join(ROLE_CHOICES)}")
     return role
+
 
 
 # ---------------------------------------------------------------- kullanıcılar
@@ -66,7 +74,7 @@ def create_user(s: Session, username: str, password: str, role: str, scope=None)
     if get_user(s, username=username):
         raise StoreError("bu kullanıcı adı zaten var")
     return s.execute(U.insert().values(username=username, password_hash=passwords.hash_password(password),
-                                       role=_role(role), camera_scope=normalize_scope(scope))
+                                       role=resolve_role(role), camera_scope=normalize_scope(scope))
                      .returning(U.c.id)).scalar_one()
 
 
@@ -79,7 +87,7 @@ def list_users(s: Session) -> list:
 def update_user(s: Session, user_id: int, *, role=None, disabled=None, scope=...) -> None:
     values = {"updated_at": func.now()}
     if role is not None:
-        values["role"] = _role(role)
+        values["role"] = resolve_role(role)
     if disabled is not None:
         values["disabled"] = bool(disabled)
     if scope is not ...:

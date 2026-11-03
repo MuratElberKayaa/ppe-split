@@ -131,15 +131,16 @@ def parse_sources():
 
 # ---------------------------------------------------------------- çizim / yardımcılar
 def draw(frame, persons, statuses, helmet_map, vest_map):
+    """Yalnız gösterim (karar değil). FAZ 10-A.7: canlı kare tüm rollere aynı JPEG olarak gider; model türevli
+    baret/yelek oranı (%) piksel olarak yazılmaz (admin dışı rol göremez; sunucuda pikselden silinemez). Oranlar
+    admin'e yalnız rol filtreli JSON ile gider. Kutu, iz ID ve UYGUN/IHLAL/ANALIZ durumu çizilmeye devam eder."""
     for pid, box, _ in persons:
-        status, hr, vr = statuses.get(int(pid), ("ANALIZ", 0, 0))
+        status = statuses.get(int(pid), ("ANALIZ", 0, 0))[0]
         color = {"UYGUN": GREEN, "IHLAL": RED}.get(status, GRAY)
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame, f"ID{int(pid)} {status}", (x1, max(14, y1 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        cv2.putText(frame, f"B:{hr*100:.0f}% Y:{vr*100:.0f}%", (x1, y2 + 14),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         for m in (helmet_map, vest_map):
             if pid in m:
                 bx = list(map(int, m[pid]))

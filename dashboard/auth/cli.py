@@ -2,10 +2,14 @@
 ile standart girdiden okunur; komut satırı argümanı olarak ALINMAZ (geçmişe/süreç listesine düşmesin).
 
     docker compose exec dashboard python -m auth.cli create admin --role admin
+    docker compose exec dashboard python -m auth.cli create saha1 --role user
     docker compose exec -T dashboard python -m auth.cli create izleyici --role viewer --cameras giris,kule --password-stdin
     docker compose exec dashboard python -m auth.cli list
     docker compose exec dashboard python -m auth.cli set-password admin
-    docker compose exec dashboard python -m auth.cli disable kullanici | enable kullanici | revoke kullanici"""
+    docker compose exec dashboard python -m auth.cli disable kullanici | enable kullanici | revoke kullanici
+
+Roller: admin (hesap/rol yönetimi + model olasılıkları), user (= supervisor: tüm operasyonel ekranlar, model
+olasılıkları yok), viewer (yalnız geçmiş/istatistik, görüntüsüz). 'user' DB'de 'supervisor' olarak saklanır."""
 import argparse
 import getpass
 import sys
@@ -31,7 +35,8 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create")
     c.add_argument("username")
-    c.add_argument("--role", required=True, choices=store.ROLES)
+    c.add_argument("--role", required=True, choices=store.ROLE_CHOICES,
+                   help="admin | user (= supervisor) | supervisor | viewer")
     c.add_argument("--cameras", help="virgülle kamera kimlikleri (boş = tüm kameralar)")
     c.add_argument("--password-stdin", action="store_true")
     p = sub.add_parser("set-password")
@@ -50,10 +55,12 @@ def main(argv=None) -> int:
                 return 0
             if args.cmd == "create":
                 cams = [x.strip() for x in args.cameras.split(",") if x.strip()] if args.cameras else None
-                uid = store.create_user(s, args.username, _password(args), args.role, cams)
-                store.audit(s, "user_create", "success", detail={"target_user_id": uid, "role": args.role,
+                role = store.resolve_role(args.role)
+                uid = store.create_user(s, args.username, _password(args), role, cams)
+                store.audit(s, "user_create", "success", detail={"target_user_id": uid, "role": role,
                                                                  "reason": "cli"})
-                print(f"kullanıcı oluşturuldu: {store.normalize_username(args.username)} ({args.role})")
+                alias = f" — '{args.role}' girişi" if args.role != role else ""
+                print(f"kullanıcı oluşturuldu: {store.normalize_username(args.username)} ({role}{alias})")
                 return 0
             user = store.get_user(s, username=store.normalize_username(args.username))
             if user is None:
