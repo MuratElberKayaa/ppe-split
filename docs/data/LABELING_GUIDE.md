@@ -92,3 +92,79 @@ UNKNOWN, NOT_EVALUABLE, düşük güven, önetiket, her incident) için ikinci a
 ```
 Tam sentetik veri kümesi ve tüm hata senaryoları: `python -m evaluation data-fixtures --out <dizin> --scenario <ad>`
 (senaryolar: `evaluation/fixtures.py`).
+
+## 8. Hata odaklı etiketleme profilleri (E-01 – E-04)
+
+**Amaç:** SteelBench'te kayıtlı dört bilinen hatayı (`tools/reliability/steelbench_expected.json`) ileride **etiketli,
+izinli saha verisiyle** ölçebilmek. Profiller `ppe-annotation/1`'in yerine geçmez; kişi düzeyinde isteğe bağlı
+`attributes` nesnesi ve kare düzeyinde isteğe bağlı `hard_negatives` listesi ekler (DATASET_SPEC §1.8). Gerçek kişi
+kimliği, ad, yüz özelliği yazılmaz. Bu profiller bugün **yalnız sentetik örnekle** kullanılabilir (DATA_GOVERNANCE §0).
+
+### 8.1 Ortak kurallar
+
+- **Yoğunluk:** profil kliplerinde her **işlenen kare** (üretim VID_STRIDE=2 → ~12.5 Hz) veya en seyrek 0.5 sn'de bir
+  etiketlenir. Seyrek etiket süre, ID değişimi ve örtülme süresi ölçümünü bozar.
+- **Kapsamlılık:** profil klibindeki etiketli her karede görünen **tüm** kişiler etiketlenir (E-02'de "kişi yok"
+  bilgisi ölçümdür).
+- **Bölüm (episode):** örtülme, kenar teması veya kadrajdan çıkış gibi olaylar `attributes.episode_id` ile (video-yerel,
+  `ep1`…) işaretlenir; süre, bölümün ilk ve son karesinin `pts_sec` farkından **hesaplanır** (elle yazılmaz).
+- Profil etiketleri **kritik etikettir**: ikinci insan incelemesi zorunlu (§6); IAA her profil için ayrı raporlanır.
+- Profil klipleri seçilirken model çıktısına bakılmaz (seçim yanlılığı); seçim ölçütü sahne koşuludur.
+
+### 8.2 E-01 — Kısmen örtülü koyu baret
+
+| Alan | Değerler | Kural |
+|---|---|---|
+| `helmet.status` | PRESENT / MISSING / UNKNOWN | Görünen kısım açıkça baretse PRESENT (görünen kısım kutusuyla); bölge görünmüyorsa UNKNOWN; **açıkça görünen baş + baret yok** ise MISSING |
+| `attributes.helmet_color` | `dark` / `light` / `hivis` / `unknown` | Yalnız PRESENT'ta; renk kişisel veri değildir |
+| `attributes.head_visibility` | `full` / `partial_lt50` / `partial_ge50` / `hidden` | Baş bölgesinin görünen oranı (göz kararı, kategori) |
+| `attributes.head_occluder` | `none` / `carried_object` / `other_person` / `structure` / `vehicle` / `self` / `frame_edge` | Örtülmeye neden olan şey |
+| `attributes.episode_id` | `epN` | Kesintisiz örtülme bölümü |
+
+- `visibility = head_hidden` ise baret PRESENT/MISSING **yazılamaz** (doğrulayıcı zorunlu kılıyor).
+- **Pozitif örnek gerekir:** gerçekten baretsiz kişiler (koyu saç, kapüşon, bere, şapka) — yalnız örtülü-baret
+  örnekleriyle "örtülüyken bilinmiyor" kuralı ölçülürse kaçırma artışı **görünmez**.
+
+### 8.3 E-02 — İş makinesinin kişi algılanması
+
+| Alan | Değerler | Kural |
+|---|---|---|
+| Kişi etiketleri | `ppe-annotation/1` | Makine, manken, levha, gölge **kişi etiketlenmez** |
+| `hard_negatives[]` (kare) | `{box, category}`; `category`: `machinery_arm` / `vehicle` / `mannequin_or_sign` / `equipment_pile` / `shadow_or_reflection` / `other` | Yalnız kişiye benzeyebilecek nesneler; kutu kaba olabilir |
+| `attributes.near_machinery` (kişi) | `none` / `near` / `operating` | Gerçek kişinin makineye yakınlığı (iyileştirmenin gerçek kişileri bastırmadığını ölçmek için) |
+
+- Kare **kapsamlı** etiketlenmeli: etiketli karede GT kişisi olmayan her model kişisi yanlış pozitiftir.
+- Makineli sahnelerde **gerçek kişi** örnekleri de olmalı (operatör, yanında çalışan).
+
+### 8.4 E-03 — Kadraj kenarında kapsam kaybı
+
+| Alan | Değerler | Kural |
+|---|---|---|
+| `truncated` | true/false | Kişi kutusu kadraj sınırına değiyor/kesik |
+| `attributes.edge_contact` | `[]` veya `top` / `bottom` / `left` / `right` listesi | Kutunun değdiği kenarlar |
+| `attributes.head_in_frame` | true / false | Baş bölgesi kadraj içinde mi |
+| `person_status` + `not_evaluable_reason` | EVALUABLE / NOT_EVALUABLE (`truncated`, `too_small`, …) | **İnsan** değerlendirebiliyorsa EVALUABLE (sistemin kapısı ne derse desin) |
+| `attributes.episode_id` | `epN` | Kenarda kalma bölümü |
+
+- Kural: baş kadraj içinde ve baret seçilebiliyorsa kişi EVALUABLE'dır; sistem `edge` nedeniyle karar vermiyorsa bu
+  **kapsam kaybı** olarak ölçülür (FAZ 10-A.4: V2 iz 1, 24 sn %0).
+
+### 8.5 E-04 — İz kimliği parçalanması
+
+| Alan | Değerler | Kural |
+|---|---|---|
+| `track_id` | video-yerel anonim değerlendirme kimliği (`t1`…) | Aynı kişi klip boyunca **aynı** kimlik; kişi kimliği değildir |
+| `reentry` | true / false | Etiketli karelerde kaybolup dönüşte true (§3 M) |
+| `occlusion` + `attributes.occluder` | `vehicle` / `other_person` / `structure` / `other` | Kişinin gövdesini örten şey (E-01'deki `head_occluder` yalnız baş içindir) |
+| `attributes.episode_id` | `epN` | Örtülme veya kadraj dışı bölümü |
+
+- Model iz kimlikleri **etiketlenmez**; değerlendirme çalıştırmasından gelir (ID switch, parçalanma, duplicate incident
+  hesaplanır).
+- Kimlik eşleştirmesi yalnız görünüm, konum ve süreklilikle; yüz/ad kullanılmaz. Emin değilse yeni `track_id` ve
+  `annotator_confidence: low` (kritik → ikinci göz).
+
+### 8.6 Profil IAA'sı
+
+`data-agreement` kutu ve durum uyumunu verir. Profil öznitelikleri (`head_visibility`, `edge_contact`, `head_in_frame`,
+`near_machinery`) ve `track_id` sürekliliği için **ayrı** uyum ölçümü gerekir (araç eksiği — FAZ 10-A.5 deney
+protokolü §6). Kabul eşikleri İSG ve veri sorumlusuyla belirlenir; belirlenene kadar "ölçüldü" yazılır.
