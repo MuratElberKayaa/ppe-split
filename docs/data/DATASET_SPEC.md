@@ -106,6 +106,27 @@ Belgenin hiçbir yerinde şu alanlar bulunamaz (`E_PRIVACY_FIELD`): `name, full_
 worker_id, national_id, tc, tc_kimlik, face, face_box, face_embedding, embedding, biometric, phone, email, address,
 plate, license_plate`. Kimlikler anonim kalıplara uymalıdır (`E_ID_FORMAT`).
 
+### 1.8 İsteğe bağlı hata profili ekleri (FAZ 10-A.5 hazırlığı)
+
+`ppe-annotation/1` sürümü **değişmeden** iki isteğe bağlı ek kullanılabilir (anlamları: LABELING_GUIDE §8):
+
+| Ek | Yer | Alanlar |
+|---|---|---|
+| `attributes` | kişi | `profile`, `episode_id`, `helmet_color`, `head_visibility`, `head_occluder`, `occluder`, `edge_contact[]`, `head_in_frame`, `near_machinery` |
+| `hard_negatives` | kare | `[{box, category}]` — kişi olmayan, kişiye benzeyen nesneler |
+
+Ekipman nesnesine (`helmet` / `vest`) ek alan **konmaz** (şemada `additionalProperties: false`). Uyumluluk (2026-11-03,
+sentetik belgeyle denendi): mevcut doğrulayıcı ve JSON Schema ekleri kabul eder; gizlilik taraması `attributes` içinde de
+çalışır. **Bilinen araç eksikleri (kod işi, FAZ 10-A.5 — bu belgeyle uygulanmadı):**
+
+1. Doğrulayıcı ek alanların değerlerini ve tutarlılığını denetlemiyor (ör. `head_in_frame=false` iken baret PRESENT).
+2. `to_eval_video` ekleri `ppe-eval-video/1`'e taşımıyor → FAZ 8 kırılımları yalnız `visibility` ve kişi yüksekliğine
+   göre; `helmet_color`, `edge_contact`, `near_machinery` kırılımları ve `hard_negatives` kategorisine göre yanlış kişi
+   sayımı yapılamıyor.
+3. Bölüm (`episode_id`) bazlı süre ve "kapsam kaybı süresi" hesabı yok.
+4. Gizlilik taraması alan adını **tam eşleşmeyle** arıyor: `name` yakalanır, `worker_name` yakalanmaz → alt dize/kalıp
+   denetimine genişletilmeli.
+
 ## 2. Manifest `ppe-dataset-manifest/1`
 
 | Alan | İçerik |

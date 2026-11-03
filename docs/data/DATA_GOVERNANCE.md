@@ -106,3 +106,15 @@ rıza durumu. Doğrulanmadıysa `LICENSE_UNVERIFIED` (doğrulayıcıda BLOCKED).
 | Yeni veri kümesi indirildi | **Hayır** |
 | Ana veri (PostgreSQL, snapshot, outbox) değiştirildi | **Hayır** |
 | Repo'ya eklenen veri | Yalnız sentetik fikstür kodu ve JSON Schema |
+
+## 11. Hata odaklı veri (E-01 – E-04) için ek kısıtlar
+
+- Profil verisi (örtülü baret, iş makinesi sahneleri, kadraj kenarı, örtülme) de **kişisel veridir**; §1 kapısı aynen
+  geçerlidir. "Kişisiz" görünen zor negatif kareler (iş makinesi) de arka planda kişi veya plaka içerebilir → aynı kapı.
+- **SteelBench videoları (V1–V3) hiçbir eğitim, doğrulama veya test kümesine girmez:** lisansları doğrulanmadı
+  (`LICENSE_UNVERIFIED`) ve SteelBench'in regresyon kapısı olarak bağımsız kalmaları gerekir; eğitime girerlerse
+  regresyon sonucu anlamını yitirir.
+- Construction-PPE modelin eğitim kümesidir; E-01–E-04 ölçümünde **test** olarak kullanılamaz (FAZ 8 sızıntı bulgusu).
+- Hedefli veri toplama (ör. yalnız koyu baretli çalışan) kişiyi hedefleme sayılmamalı: sahne/koşul bazlı örnekleme
+  yapılır, kişi seçilmez; örnekleme planı veri sorumlusuna onaylatılır (G5).
+- Sentetik örnekler yalnız hat testleri içindir; doğruluk metriğine katılmaz.
