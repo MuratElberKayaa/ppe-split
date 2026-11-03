@@ -146,6 +146,12 @@ class AuthCtx:
     def camera_ok(self, camera_id: str) -> bool:
         return self.scope is None or camera_id in self.scope
 
+    @property
+    def model_scores(self) -> bool:
+        """FAZ 10-A.7: model türevli oran/olasılık alanları (baret/yelek eşleşme oranı vb.) yalnız admin'e gider.
+        Filtre sunucu yanıtında uygulanır (arayüzde gizlemek yeterli değildir); karar alanları herkes için aynıdır."""
+        return self.at_least("admin")
+
 
 _CACHE: dict = {}                  # token_hash -> (AuthCtx, cache_until, last_touch, validated_at)
 _CACHE_LOCK = threading.Lock()

@@ -562,14 +562,52 @@ def _meta(c: Cam):
     return m
 
 
+# ---------------- FAZ 10-A.7: rol bazlı veri sunumu ----------------
+# Model türevli oranlar (PPEMonitor'ün kayan penceredeki baret/yelek eşleşme yüzdesi: olay/geçmiş helmet_rate,
+# vest_rate; canlı kişi ve run raporu satırında helmet, vest) yalnız ctx.model_scores (admin) ile gider. Canlı yanıtlar
+# İZİN LİSTESİYLE kurulur: dedektörün ileride ekleyeceği bir alan (ör. güven skoru) kendiliğinden tarayıcıya gitmez.
+# Karar alanları (durum, eksik ekipman, zaman, kimlikler) her rol için aynıdır; RAM/DB'deki özgün veri değişmez.
+ALERT_KEYS = ("id", "cam", "cam_name", "wall", "type", "pid", "t", "missing", "missing_helmet", "missing_vest",
+              "event_id", "run_id", "incident_id", "camera_id", "occurred_at", "box", "orphan", "snapshot")
+ALERT_SCORE_KEYS = ("helmet_rate", "vest_rate")
+PEOPLE_KEYS, PEOPLE_SCORE_KEYS = ("pid", "status"), ("helmet", "vest")
+REPORT_KEYS, REPORT_SCORE_KEYS = ("pid", "first", "last", "n", "violation"), ("helmet", "vest")
+SUMMARY_KEYS = tuple(EMPTY_SUMMARY)
+# meta serbest biçimlidir (dedektör + sağlık özeti): admin dışı rolde olasılık/oran adlı her anahtar çıkarılır.
+SCORE_NAME = re.compile(r"(^|_)(conf|confidence|score|scores|prob|probs|probability|probabilities|logit|logits)$"
+                        r"|_rate$")
+NOT_SCORES = {"low_conf"}          # kapsam nedeni SAYISI (düşük güven yüzünden değerlendirilemeyen kişi), olasılık değil
+
+
+def _pick(d, keys: tuple, extra: tuple = ()) -> dict:
+    return {k: d[k] for k in keys + extra if isinstance(d, dict) and k in d}
+
+
+def _alert_out(a: dict, scores: bool) -> dict:
+    return _pick(a, ALERT_KEYS, ALERT_SCORE_KEYS if scores else ())
+
+
+def _scrub_scores(v):
+    if isinstance(v, dict):
+        return {k: _scrub_scores(x) for k, x in v.items()
+                if not (isinstance(k, str) and k not in NOT_SCORES and SCORE_NAME.search(k))}
+    if isinstance(v, list):
+        return [_scrub_scores(x) for x in v]
+    return v
+
+
 @app.get("/api/state")
 def state(after: int = 0, ctx: AuthCtx = Depends(require("supervisor"))):
+    scores = ctx.model_scores
     with LOCK:
         cams = sorted((c for c in CAMS.values() if ctx.camera_ok(c.id)), key=lambda c: c.idx)
-        new_alerts = [a for a in ALERTS if a["id"] > after and ctx.camera_ok(a.get("cam", ""))]
+        new_alerts = [_alert_out(a, scores) for a in ALERTS if a["id"] > after and ctx.camera_ok(a.get("cam", ""))]
         seq = ALERT_SEQ
-    cameras = [{"id": c.id, "idx": c.idx, "name": c.name, "meta": _meta(c),
-                "summary": c.summary, "people": c.people} for c in cams]
+    cameras = [{"id": c.id, "idx": c.idx, "name": c.name,
+                "meta": _meta(c) if scores else _scrub_scores(_meta(c)),
+                "summary": _pick(c.summary, SUMMARY_KEYS),
+                "people": [_pick(p, PEOPLE_KEYS, PEOPLE_SCORE_KEYS if scores else ()) for p in c.people]}
+               for c in cams]
     totals = {k: sum(c.summary.get(k, 0) for c in cams) for k in ("people", "ok", "viol", "analyzing")}
     return JSONResponse({"cameras": cameras, "totals": totals,
                          "alerts": new_alerts, "last_alert_id": seq})
@@ -577,15 +615,17 @@ def state(after: int = 0, ctx: AuthCtx = Depends(require("supervisor"))):
 
 @app.get("/api/alerts")
 def alerts(ctx: AuthCtx = Depends(require("supervisor"))):
+    scores = ctx.model_scores
     with LOCK:
-        return [a for a in reversed(ALERTS) if ctx.camera_ok(a.get("cam", ""))]
+        return [_alert_out(a, scores) for a in reversed(ALERTS) if ctx.camera_ok(a.get("cam", ""))]
 
 
 @app.get("/api/report")
 def report(ctx: AuthCtx = Depends(require("supervisor"))):
+    extra = REPORT_SCORE_KEYS if ctx.model_scores else ()
     with LOCK:
         cams = sorted((c for c in CAMS.values() if ctx.camera_ok(c.id)), key=lambda c: c.idx)
-    return [{**r, "cam": c.id, "cam_name": c.name} for c in cams for r in c.report]
+    return [{**_pick(r, REPORT_KEYS, extra), "cam": c.id, "cam_name": c.name} for c in cams for r in c.report]
 
 
 _DB_STATUS = ops.Cached(lambda: ops.db_status(check_ready, get_engine), ttl=5.0)
@@ -808,8 +848,9 @@ def history_incident(incident_id: uuid.UUID, ctx: AuthCtx = Depends(require("vie
                           "occurred_at": _iso(e["occurred_at"]), "ingested_at": _iso(e["ingested_at"]),
                           "video_time_sec": _num(e["video_time_sec"]),
                           "missing": _missing_text(e["missing_helmet"], e["missing_vest"]),
-                          "helmet_rate": e["helmet_rate"], "vest_rate": e["vest_rate"], "box": e["box"],
-                          **_snapshot(e["snapshot_path"], images)} for e in r["timeline"]],
+                          **({"helmet_rate": e["helmet_rate"], "vest_rate": e["vest_rate"]}
+                             if ctx.model_scores else {}),
+                          "box": e["box"], **_snapshot(e["snapshot_path"], images)} for e in r["timeline"]],
             "timeline_truncated": r["timeline_truncated"]}
 
 
@@ -855,6 +896,7 @@ def history_run(run_id: uuid.UUID, ctx: AuthCtx = Depends(require("viewer"))):
         raise HTTPException(status_code=404, detail="run bulunamadı")
     return {**_run_out(r), "incidents_by_status": r["incidents_by_status"],
             "persons": [{"track_id": p["pid"], "first_sec": _num(p["first_sec"]), "last_sec": _num(p["last_sec"]),
-                         "observations": p["observations"], "helmet_rate": p["helmet_rate"],
-                         "vest_rate": p["vest_rate"], "ever_violation": p["ever_violation"],
-                         "updated_at": _iso(p["updated_at"])} for p in r["persons"]]}
+                         "observations": p["observations"],
+                         **({"helmet_rate": p["helmet_rate"], "vest_rate": p["vest_rate"]} if ctx.model_scores else {}),
+                         "ever_violation": p["ever_violation"], "updated_at": _iso(p["updated_at"])}
+                        for p in r["persons"]]}

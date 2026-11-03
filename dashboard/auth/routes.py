@@ -152,7 +152,7 @@ def logout(request: Request, response: Response, ctx: AuthCtx = Depends(require_
 def me(ctx: AuthCtx = Depends(require("viewer"))):
     return {"user": _user_out(ctx), "csrf_token": ctx.csrf, "profile": security.PROFILE,
             "permissions": {"live": ctx.at_least("supervisor"), "snapshots": ctx.at_least("supervisor"),
-                            "admin": ctx.at_least("admin")}}
+                            "admin": ctx.at_least("admin"), "model_scores": ctx.model_scores}}
 
 
 class PasswordChangeIn(BaseModel):
@@ -210,9 +210,10 @@ def admin_users(ctx: AuthCtx = Depends(require("admin"))):
 @router.post("/api/admin/users", status_code=201)
 def admin_create_user(body: UserCreateIn, request: Request, ctx: AuthCtx = Depends(require_csrf("admin"))):
     def run(s):
-        uid = store.create_user(s, body.username, body.password, body.role, body.cameras)
+        role = store.resolve_role(body.role)                        # 'user' -> 'supervisor'
+        uid = store.create_user(s, body.username, body.password, role, body.cameras)
         store.audit(s, "user_create", "success", user_id=ctx.user_id, ip=security.client_ip(request),
-                    detail={"target_user_id": uid, "role": body.role})
+                    detail={"target_user_id": uid, "role": role})
         return uid
     return {"id": _db(run)}
 
@@ -224,17 +225,18 @@ def admin_update_user(user_id: int, body: UserUpdateIn, request: Request,
         target = store.get_user(s, user_id=user_id)
         if target is None:
             raise LookupError
-        demote = target["role"] == "admin" and (body.role not in (None, "admin") or body.disabled is True)
+        role = None if body.role is None else store.resolve_role(body.role)    # 'user' -> 'supervisor'
+        demote = target["role"] == "admin" and (role not in (None, "admin") or body.disabled is True)
         if demote and not target["disabled"] and store.active_admins(s) <= 1:
             raise store.StoreError("son etkin yönetici devre dışı bırakılamaz veya rolü düşürülemez")
         scope = None if body.all_cameras else (body.cameras if body.cameras is not None else ...)
-        store.update_user(s, user_id, role=body.role, disabled=body.disabled, scope=scope)
+        store.update_user(s, user_id, role=role, disabled=body.disabled, scope=scope)
         changes = [k for k in ("role", "disabled", "cameras") if getattr(body, k) is not None] + (
             ["all_cameras"] if body.all_cameras else [])
         if body.role is not None or body.disabled or scope is not ...:
             store.revoke_user_sessions(s, user_id, "policy_changed")   # yeni yetki yeni oturumla geçerli olur
         store.audit(s, "user_update", "success", user_id=ctx.user_id, ip=security.client_ip(request),
-                    detail={"target_user_id": user_id, "changes": changes, "role": body.role})
+                    detail={"target_user_id": user_id, "changes": changes, "role": role})
     _db(run)
     security.invalidate(user_id=user_id)
     return {"ok": True}

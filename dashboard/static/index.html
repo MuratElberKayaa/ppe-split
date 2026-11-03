@@ -516,8 +516,9 @@ function fillCard(c, a) {
   c.cam.textContent = a.cam_name; c.cam.title = a.camera_id || a.cam;
   c.time.textContent = f.type === "start" ? f.wall : a.wall;
   const missing = closed ? (f.type === "end" ? "–" : f.missing) : a.missing;
-  const [hc, ht] = equip(closed ? { missing_helmet: false } : a, "helmet");
-  const [vc, vt] = equip(closed ? { missing_vest: false } : a, "vest");
+  const state = k => closed && f.type === "start" && f["missing_" + k] === true ? ["eq-ok", "Eksikti → tekrar görüldü"]
+    : equip(closed ? { ["missing_" + k]: false } : a, k);
+  const [hc, ht] = state("helmet"), [vc, vt] = state("vest");
   const rows = [
     ["İhlal", missing || "–"],
     ["Baret", el("span", { class: hc, text: ht })],
@@ -527,7 +528,8 @@ function fillCard(c, a) {
     ["Video", f.type === "start" ? `${fmtT(f.t)}${closed ? " → " + fmtT(a.t) : ""}` : fmtT(a.t)],
     ["Incident", el("span", { text: shortId(a.incident_id), title: a.incident_id || "" })],
     ["Run", el("span", { text: shortId(a.run_id), title: a.run_id || "" })]];
-  if (a.helmet_rate != null && a.vest_rate != null) rows.push(["Model oranı", `baret %${a.helmet_rate} · yelek %${a.vest_rate}`]);
+  if (SCORES && a.helmet_rate != null && a.vest_rate != null)
+    rows.push(["Model oranı", `baret %${a.helmet_rate} · yelek %${a.vest_rate}`]);
   c.kv.replaceChildren(...rows.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", null, v)]));
 }
 function addAlert(a, animate) {
@@ -565,15 +567,17 @@ function clearFeed() {
   $("feed").replaceChildren(); $("feedEmpty").style.display = ""; openAlerts.clear(); seenEvents.clear();
 }
 
+/* FAZ 10-A.7: model oranı (%) sütunları yalnız admin oturumunda (SCORES) ve sunucu alanı gerçekten gönderdiyse çizilir;
+   sunucu admin dışı role bu alanları hiç göndermez (gizleme yalnız arayüzde değildir). */
+const PERSON_STATUS = { UYGUN: "Uygun", IHLAL: "İhlal", ANALIZ: "Analiz" };
+const pct = v => (v == null ? "–" : `%${v}`);
 function renderPeople(cams) {
-  const w = $("peopleWrap");
-  const rows = cams.flatMap(c => c.people.map(p =>
-    `<tr><td>${esc(c.name)}</td><td>ID ${p.pid}</td>` +
-    `<td><span class="pill ${p.status}">${{ UYGUN: "Uygun", IHLAL: "İhlal", ANALIZ: "Analiz" }[p.status]}</span></td>` +
-    `<td>%${p.helmet}</td><td>%${p.vest}</td></tr>`)).join("");
-  w.innerHTML = rows
-    ? `<table><thead><tr><th>Kamera</th><th>Kişi</th><th>Durum</th><th>Baret görülme</th><th>Yelek görülme</th></tr></thead><tbody>${rows}</tbody></table>`
-    : '<div class="empty">Şu an hiçbir kadrajda kimse yok.</div>';
+  const rows = cams.flatMap(c => c.people.map(p => el("tr", null, el("td", { text: c.name }), el("td", { text: `ID ${p.pid}` }),
+    el("td", null, pill(PERSON_STATUS[p.status] ? p.status : "ANALIZ", PERSON_STATUS[p.status] || "–")),
+    SCORES ? [el("td", { text: pct(p.helmet) }), el("td", { text: pct(p.vest) })] : null)));
+  $("peopleWrap").replaceChildren(rows.length
+    ? table(["Kamera", "Kişi", "Durum", ...(SCORES ? ["Baret görülme (model %)", "Yelek görülme (model %)"] : [])], rows)
+    : el("div", { class: "empty", text: "Şu an hiçbir kadrajda kimse yok." }));
 }
 
 /* ---------- FAZ 10-A: analiz kapsamı (yalnız gösterim; PPE kararı değişmez) ---------- */
@@ -597,10 +601,13 @@ function renderCoverage(cams) {
 
 /* ---------- durum döngüsü ---------- */
 async function tick() {
+  const gen = SESSION;
   try {
     const res = await fetch(`/api/state?after=${after}`);
+    if (gen !== SESSION) return;                       // oturum bu arada değişti: eski yanıt yazılmaz
     if (res.status === 401) { showLogin("Oturum sona erdi; tekrar giriş yapın."); return; }
     const d = await res.json();
+    if (gen !== SESSION) return;
     fails = 0;
     d.cameras.forEach(syncCam);
     const t = d.totals;
@@ -637,12 +644,16 @@ async function tick() {
 $("clear").onclick = clearFeed;
 $("dlg").onclick = () => $("dlg").close();
 $("loadReport").onclick = async () => {
-  const rep = await (await fetch("/api/report")).json();
   const w = $("reportWrap");
-  if (!rep.length) { w.innerHTML = '<div class="empty">Rapor henüz hazır değil; dedektör bir videoyu bitirince oluşur.</div>'; return; }
-  w.innerHTML = '<table><thead><tr><th>Kamera</th><th>Kişi</th><th>Aralık</th><th>Gözlem</th><th>Baret</th><th>Yelek</th><th>Sonuç</th></tr></thead><tbody>' +
-    rep.map(p => `<tr><td>${esc(p.cam_name)}</td><td>ID ${p.pid}</td><td>${p.first}–${p.last} sn</td><td>${p.n}</td><td>%${p.helmet}</td><td>%${p.vest}</td>` +
-      `<td><span class="pill ${p.violation ? "IHLAL" : "UYGUN"}">${p.violation ? "İhlal yaşandı" : "Uygun"}</span></td></tr>`).join("") + "</tbody></table>";
+  let rep;
+  try { rep = await getJSON("/api/report"); }
+  catch (e) { w.replaceChildren(el("div", { class: "empty", text: e.message })); return; }
+  if (!rep.length) { w.replaceChildren(el("div", { class: "empty", text: "Rapor henüz hazır değil; dedektör bir videoyu bitirince oluşur." })); return; }
+  w.replaceChildren(table(["Kamera", "Kişi", "Aralık", "Gözlem", ...(SCORES ? ["Baret (model %)", "Yelek (model %)"] : []), "Sonuç"],
+    rep.map(p => el("tr", null, el("td", { text: p.cam_name }), el("td", { text: `ID ${p.pid}` }),
+      el("td", { text: `${p.first}–${p.last} sn` }), el("td", { text: p.n }),
+      SCORES ? [el("td", { text: pct(p.helmet) }), el("td", { text: pct(p.vest) })] : null,
+      el("td", null, pill(p.violation ? "IHLAL" : "UYGUN", p.violation ? "İhlal yaşandı" : "Uygun"))))));
 };
 
 /* ---------- FAZ 4: geçmiş, istatistik ve run raporları ----------
@@ -705,9 +716,10 @@ const rangeParams = form => ({ from: dayStartISO(form.elements.from.value), to: 
 
 class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
 async function getJSON(path, params) {
-  const q = new URLSearchParams();
+  const q = new URLSearchParams(), gen = SESSION;
   for (const [k, v] of Object.entries(params || {})) if (v != null && v !== "") q.append(k, v);
   const r = await fetch(path + (String(q) ? "?" + q : ""));
+  if (gen !== SESSION) throw new ApiError("", 0);       // önceki oturumun yanıtı: sessizce atılır
   if (r.status === 401) {
     showLogin("Oturum sona erdi; tekrar giriş yapın.");
     throw new ApiError("Oturum gerekli.", 401);
@@ -723,7 +735,9 @@ async function getJSON(path, params) {
     }
     throw new ApiError(msg, r.status);
   }
-  return r.json();
+  const body = await r.json();
+  if (gen !== SESSION) throw new ApiError("", 0);
+  return body;
 }
 
 function setStatus(id, msg, err) { const s = $(id); s.textContent = msg || ""; s.classList.toggle("err", !!err); }
@@ -829,7 +843,7 @@ async function showIncident(id) {
     if (!current()) return;
     const pic = SNAP_RE.test(d.snapshot || "")
       ? Object.assign(el("img", { alt: "İhlal başlangıç anı" }), { src: d.snapshot, onclick: () => zoom(d.snapshot) })
-      : el("div", { class: "empty", text: d.snapshot_restricted ? "Görüntüyü yalnız sorumlu ve yönetici rolleri görebilir."
+      : el("div", { class: "empty", text: d.snapshot_restricted ? "Görüntüyü yalnız kullanıcı ve yönetici rolleri görebilir."
         : d.snapshot_missing ? "Görüntü dosyası bulunamadı." : "Görüntü kaydı yok." });
     const video = d.video_first_sec == null ? "–" : `${d.video_first_sec} – ${d.video_last_sec} sn`;
     const info = kv([
@@ -852,11 +866,11 @@ async function showIncident(id) {
     const rows = d.timeline.map(e => el("tr", null,
       el("td", { text: fmtDT(e.occurred_at) }), el("td", { text: EVENT_TYPE[e.type] || e.type }),
       el("td", { class: "num", text: e.video_time_sec ?? "–" }), el("td", { text: e.missing || "–" }),
-      el("td", { class: "num", text: e.helmet_rate ?? "–" }), el("td", { class: "num", text: e.vest_rate ?? "–" })));
+      SCORES ? [el("td", { class: "num", text: e.helmet_rate ?? "–" }), el("td", { class: "num", text: e.vest_rate ?? "–" })] : null));
     openDetail("İhlal detayı", el("div", { class: "detail-top" }, pic, info),
       el("h2", { text: "Olay zaman çizelgesi", style: "padding-left:0" }),
       el("div", { class: "tscroll" }, table(["Zaman", "Olay", { text: "Video sn", class: "num" }, "Eksik",
-        { text: "Baret %", class: "num" }, { text: "Yelek %", class: "num" }], rows)),
+        ...(SCORES ? [{ text: "Baret (model %)", class: "num" }, { text: "Yelek (model %)", class: "num" }] : [])], rows)),
       d.timeline_truncated ? el("p", { class: "why", text: "Zaman çizelgesi kısaltıldı (ilk olaylar gösteriliyor)." }) : null);
   } catch (e) { if (current()) openDetail("İhlal detayı", el("p", { class: "status-line err", text: e.message })); }
 }
@@ -1045,12 +1059,12 @@ async function showRun(id) {
     };
     const persons = r.persons.map(p => el("tr", null, el("td", { text: `#${p.track_id}` }),
       el("td", { text: `${p.first_sec} – ${p.last_sec} sn` }), el("td", { class: "num", text: fmtN(p.observations) }),
-      el("td", { class: "num", text: `%${p.helmet_rate}` }), el("td", { class: "num", text: `%${p.vest_rate}` }),
+      SCORES ? [el("td", { class: "num", text: pct(p.helmet_rate) }), el("td", { class: "num", text: pct(p.vest_rate) })] : null,
       el("td", null, pill(p.ever_violation ? "IHLAL" : "UYGUN", p.ever_violation ? "İhlal yaşandı" : "Uygun"))));
     openDetail("Run raporu", liveNote, info, byStatus, go,
       el("h2", { text: "Kişi (iz) raporu", style: "padding-left:0" }),
       persons.length ? el("div", { class: "tscroll" }, table(["İz ID", "Aralık", { text: "Gözlem", class: "num" },
-        { text: "Baret", class: "num" }, { text: "Yelek", class: "num" }, "Sonuç"], persons))
+        ...(SCORES ? [{ text: "Baret (model %)", class: "num" }, { text: "Yelek (model %)", class: "num" }] : []), "Sonuç"], persons))
         : el("div", { class: "empty", text: "Bu run için kişi raporu yok (run sürüyor veya rapor gelmedi)." }));
   } catch (e) { if (current()) openDetail("Run raporu", el("p", { class: "status-line err", text: e.message })); }
 }
@@ -1091,7 +1105,10 @@ window.addEventListener("resize", () => {
 });
 /* --- oturum (FAZ 6): sunucu tarafı oturum, HttpOnly çerez; CSRF token yalnız bellekte --- */
 let ME = null, CSRF = null, LIVE_OK = false, liveTimer = null;
-const ROLE_TR = { admin: "Yönetici", supervisor: "Sorumlu", viewer: "İzleyici" };
+// SCORES: model oranı yetkisi (yalnız admin; sunucu /api/auth/me'den). SESSION: oturum kuşağı — çıkış/giriş sonrası
+// önceki oturumdan gecikmeli gelen yanıt (ör. admin verisi) yeni kullanıcının ekranına yazılmaz.
+let SCORES = false, SESSION = 0;
+const ROLE_TR = { admin: "Yönetici", supervisor: "Kullanıcı", viewer: "İzleyici" };   // supervisor = "user" rolü
 function clearUserData() {         // önceki kullanıcının verisi (görüntüler dahil) gizli DOM'da kalmasın
   for (const id of ["hTable", "rTable", "rCams", "sTiles", "sChart", "sCams", "sStatusTbl", "sDailyTable",
                     "detailBody", "peopleWrap", "covWrap"]) $(id).replaceChildren();
@@ -1108,7 +1125,7 @@ function clearUserData() {         // önceki kullanıcının verisi (görüntü
   $("dlgImg").removeAttribute("src");
 }
 function showLogin(msg, isError = true) {
-  ME = null; CSRF = null; LIVE_OK = false;
+  ME = null; CSRF = null; LIVE_OK = false; SCORES = false; SESSION++;
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
   if (WS) { const w = WS; WS = null; w.close(); }
   if ($("detail").open) $("detail").close();
@@ -1121,7 +1138,7 @@ function showLogin(msg, isError = true) {
   $("loginForm").elements.username.focus();
 }
 function startApp(me) {
-  ME = me.user; CSRF = me.csrf_token; LIVE_OK = !!me.permissions.live;
+  ME = me.user; CSRF = me.csrf_token; LIVE_OK = !!me.permissions.live; SCORES = !!me.permissions.model_scores; SESSION++;
   $("loginView").hidden = true; $("appTabs").hidden = false; $("userBox").hidden = false;
   $("userName").textContent = `${ME.username} · ${ROLE_TR[ME.role] || ME.role}`;
   $("tab-live").hidden = !LIVE_OK;
