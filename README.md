@@ -33,7 +33,9 @@ Bu komut PostgreSQL 17'yi (`db`) başlatır, veritabanı rollerini ayırır (`db
 
     docker compose exec dashboard python -m auth.cli create admin --role admin
 
-Tarayıcıda http://localhost:8000 aç ve giriş yap. Roller: `viewer` (istatistik ve görüntüsüz liste), `supervisor` (+ canlı yayın ve ihlal görüntüleri, atanan kameralar), `admin` (+ kullanıcı yönetimi ve denetim kaydı). Dashboard varsayılan olarak yalnızca bu bilgisayardan erişilir; PostgreSQL portu dışarı açılmaz. LAN erişimi yalnız TLS ters vekil ile ve ön koşullar sağlandıktan sonra: [docs/LAN_DEPLOYMENT.md](docs/LAN_DEPLOYMENT.md).
+Operasyonel kullanıcı (parola yine gizli sorulur): `docker compose exec dashboard python -m auth.cli create saha1 --role user`
+
+Tarayıcıda http://localhost:8000 aç ve giriş yap. Roller: `viewer` (istatistik ve görüntüsüz liste), `user` = `supervisor` (+ canlı yayın, uyarılar, ihlal görüntüleri ve run raporları, atanan kameralar; model olasılıkları **yok**), `admin` (+ model olasılıkları, kullanıcı yönetimi ve denetim kaydı). Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md). Dashboard varsayılan olarak yalnızca bu bilgisayardan erişilir; PostgreSQL portu dışarı açılmaz. LAN erişimi yalnız TLS ters vekil ile ve ön koşullar sağlandıktan sonra: [docs/LAN_DEPLOYMENT.md](docs/LAN_DEPLOYMENT.md).
 
 Testler (gerçek PostgreSQL, ayrı `ppe_test` veritabanı): `docker compose --profile test run --rm tests`
 
