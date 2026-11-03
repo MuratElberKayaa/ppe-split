@@ -17,8 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 OUT = Path(os.getenv("REL_OUTPUT", HERE / "output"))
 COMPOSE = HERE / "docker-compose.reliability.yml"
-ENV_FILE = OUT / "rel.env"
-PROJECT = "ppe-rel"
+# REL_PROJECT / REL_ENV_FILE / REL_DEFAULT_PORT: aynı compose dosyasıyla AYRI bir izole yığın (ör. SteelBench
+# `ppe-bench`); ayrı proje adı = ayrı container, volume ve parola dosyası. Varsayılan davranış değişmez (ppe-rel).
+ENV_FILE = Path(os.getenv("REL_ENV_FILE", OUT / "rel.env"))
+PROJECT = os.getenv("REL_PROJECT", "ppe-rel")
 DETECTOR = ROOT / "detector"
 # REL_DETECTOR_PY: dedektörü başka (ör. izole güvenlik testi) venv'iyle koşturmak için
 PY = Path(os.getenv("REL_DETECTOR_PY", DETECTOR / ".venv" / "Scripts" / "python.exe"))
@@ -56,7 +58,8 @@ def env() -> dict:
         vals = {"POSTGRES_DB": "ppe_rel", "POSTGRES_USER": "ppe_rel_admin",
                 "POSTGRES_PASSWORD": secrets.token_urlsafe(24), "PPE_APP_PASSWORD": secrets.token_urlsafe(24),
                 "PPE_MIGRATOR_PASSWORD": secrets.token_urlsafe(24), "INGEST_TOKEN": secrets.token_urlsafe(32),
-                "ADMIN_PASSWORD": secrets.token_urlsafe(18) + "-Aa1", "REL_PORT": "8100"}
+                "ADMIN_PASSWORD": secrets.token_urlsafe(18) + "-Aa1",
+                "REL_PORT": os.getenv("REL_DEFAULT_PORT", "8100")}
         ENV_FILE.write_text("".join(f"{k}={v}\n" for k, v in vals.items()), encoding="utf-8")
     out = {}
     for line in ENV_FILE.read_text(encoding="utf-8").splitlines():

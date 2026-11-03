@@ -164,3 +164,11 @@ INCOMPLETE" olarak raporlanır; `docker logs ppe-rel-dashboard-1 > memprobe_part
 alınır; aynı komutla **baştan** yeniden başlatılır (süreler birleştirilmez — kesintisiz 24 saat gerekir).
 Doğrulama: `result.json` → `delivery`, `runs_by_camera`, `memprobe.summary`; zaman serisi `samples.csv`
 (`dash_cg_anon_mb`, `dash_cg_file_mb`, `dash_cg_kernel_mb` ayrı sütunlar).
+
+## 10. SteelBench (FAZ 10-A.4 referansı)
+
+Gerçek dedektörle 3 yerel videoda tekrar çalıştırılabilir referans değerlendirmesi ve kayıt bütünlüğü testi; ayrı
+izole yığın `ppe-bench` (127.0.0.1:8200). Komut: `REL_DETECTOR_PY=<dedektör venv python> python
+tools/reliability/steelbench.py run --images`. Ayrıntı, yorumlama ve lisans kısıtları: `docs/STEELBENCH.md`.
+`common.py` artık `REL_PROJECT` / `REL_ENV_FILE` / `REL_DEFAULT_PORT` ile ayrı bir izole yığın seçebilir; varsayılan
+(`ppe-rel`, `rel.env`, 8100) değişmedi.
