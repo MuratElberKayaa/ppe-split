@@ -2,8 +2,9 @@
 izin listesiyle sunulması ve incident/run ilişkileri. Gerçek PostgreSQL 17 + sınırlı ppe_app rolü; veriler gerçek
 ingest uçlarından yazılır. Yanıtların yalnız durum kodu değil JSON içeriği de denetlenir."""
 import io
-
 import re
+import threading
+import time
 import uuid
 
 import pytest
@@ -224,3 +225,57 @@ def test_index_header_and_role_aware_client(api, anon):
     assert "permissions.model_scores" in script and "SESSION" in script and "DETAIL_CACHE.clear()" in script
     assert "w.innerHTML" not in script                          # kişi/rapor tabloları DOM API ile kurulur
     assert '"helmet_rate"' not in html                          # sayfa kabuğuna veri gömülmez
+
+
+# ---------------------------------------------------------------- açık video akışında yetki yeniden doğrulaması
+def _open_stream(client, camera="cam1"):
+    """Starlette TestClient akışı parça parça vermez: istek yalnız akış sona erince döner. Bu yüzden ayrı iş
+    parçacığında açılır; iptal çalışıyorsa parça kısa sürede biter, çalışmıyorsa asılı kalır."""
+    box = {}
+
+    def run():
+        box["resp"] = client.get(f"/video_feed/{camera}")
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    return th, box
+
+
+def _frame(api, run):
+    assert post_frame(api, frame_payload([], run_id=run)).status_code == 200
+
+
+def test_open_video_stream_is_cut_when_role_is_demoted(api, monkeypatch):
+    monkeypatch.setattr(app_module, "WS_RECHECK_SEC", 0.05)
+    run = uuid.uuid4()
+    _frame(api, run)
+    user = client_as("user")
+    name = user.get("/api/auth/me").json()["user"]["username"]
+    uid = {u["username"]: u["id"] for u in api.get("/api/admin/users").json()}[name]
+    th, box = _open_stream(user)
+    time.sleep(0.4)
+    assert th.is_alive()                                       # geçerli oturum: akış sürüyor
+    assert api.patch(f"/api/admin/users/{uid}", json={"role": "viewer"}).status_code == 200
+    _frame(api, run)                                           # bekleyen akışı uyandırır; yeniden doğrulama reddeder
+    th.join(10)
+    assert not th.is_alive(), "rolü düşürülen hesabın açık video akışı kesilmedi"
+    assert box["resp"].status_code == 200 and box["resp"].content.count(b"--frame") >= 1
+    assert user.get("/video_feed/cam1").status_code == 401    # rol değişimi oturumu iptal eder
+
+
+def test_valid_video_stream_survives_rechecks_and_stops_on_disable(api, monkeypatch):
+    monkeypatch.setattr(app_module, "WS_RECHECK_SEC", 0.05)
+    run = uuid.uuid4()
+    _frame(api, run)
+    user = client_as("user")
+    name = user.get("/api/auth/me").json()["user"]["username"]
+    uid = {u["username"]: u["id"] for u in api.get("/api/admin/users").json()}[name]
+    th, box = _open_stream(user)
+    for _ in range(6):                                         # birkaç yeniden doğrulama döngüsü
+        time.sleep(0.1)
+        _frame(api, run)
+    assert th.is_alive(), "geçerli oturumun akışı yanlışlıkla kesildi"
+    assert api.patch(f"/api/admin/users/{uid}", json={"disabled": True}).status_code == 200
+    _frame(api, run)
+    th.join(10)
+    assert not th.is_alive(), "devre dışı bırakılan hesabın açık video akışı kesilmedi"
+    assert box["resp"].content.count(b"--frame") >= 2
