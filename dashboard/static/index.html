@@ -1072,6 +1072,8 @@ async function showRun(id) {
 /* --- sekmeler --- */
 const VIEWS = ["live", "history", "stats", "runs"];
 async function refreshView(v) {
+  const st = { history: "hStatus", stats: "sStatus", runs: "rStatus" }[v];
+  if (st) setStatus(st, "Yükleniyor…");          // kameralar yüklenirken önceki filtrenin eski sonucu yeni filtreyle yan yana görünmesin
   let cams = [];
   try { cams = await loadCameras(); } catch (e) { /* hata ilgili ekranın durum satırında görünür */ }
   if (v === "history") loadHistory(false);

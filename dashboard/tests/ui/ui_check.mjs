@@ -1,6 +1,6 @@
 // Gerçek tarayıcı (Microsoft Edge / Chromium, headless) ile dashboard UI testi. Bağımlılık yok: Node 22 yerleşik
 // WebSocket + fetch ile Chrome DevTools Protocol. Önce izole fixture'ı başlatın (tests/ui/serve_fixture.py).
-//   node dashboard/tests/ui/ui_check.mjs <ekran-görüntüsü-klasörü> [tarayıcı-yolu]
+//   UI_PASSWORD=<fixture'daki parola> node dashboard/tests/ui/ui_check.mjs <ekran-görüntüsü-klasörü> [tarayıcı-yolu]
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -89,7 +89,8 @@ async function clickAt(selector) {
 await cdp("Page.enable");
 await cdp("Runtime.enable");
 // FAZ 6: Node tarafı doğrudan API çağrıları için ayrı oturum (tarayıcı oturumundan bağımsız)
-const UI_PASS = "Ui-Test-Parola-2026";
+const UI_PASS = process.env.UI_PASSWORD || "";   // fixture ile AYNI geçici parola (kaynak kodda sabit parola yok)
+if (UI_PASS.length < 12) throw new Error("UI_PASSWORD ortam değişkeni gerekli (fixture'ı başlatırken kullanılan parola)");
 async function nodeLogin(base, user) {
   const r = await fetch(base + "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json",
     Origin: base }, body: JSON.stringify({ username: user, password: UI_PASS }) });
@@ -309,6 +310,8 @@ await check("Run detayı -> 'Bu run'ın ihlallerini listele' geçmişi run'a gö
   await ev(`[...document.querySelectorAll("#detailBody button")].find(b => b.textContent.includes("ihlallerini")).click(); return true;`);
   await waitFor(`!document.getElementById("view-history").hidden && !document.getElementById("hRunChip").hidden`);
   await idle("hStatus");
+  // fixture: bu run'da 1 + 1 (stale) + 1 (run_end) + 60 kapalı = 63 ihlal; tüm run'larda toplam 66 (filtresiz)
+  await waitFor(`document.getElementById("hStatus").textContent.startsWith("63 ihlal")`).catch(() => {});
   const s = await text("#hStatus");
   assert(s.startsWith("63 ihlal"), s);
   return s;
