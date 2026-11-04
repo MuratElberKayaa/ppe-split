@@ -90,14 +90,9 @@ def seed_finished_run(base: str):
 
 
 def main():
-    password = os.environ.get("UI_PASSWORD", "")
-    if len(password) < 12:
-        sys.exit("UI_PASSWORD ortam değişkeni gerekli (en az 12 karakter; yalnız bu izole test veritabanı için)")
     url = db("ppe_ui_live_test")
     data_dir = "/tmp/ui-live"
     os.makedirs(f"{data_dir}/snapshots", exist_ok=True)
-    import tests.ui.serve_fixture as sf
-    sf.UI_PASSWORD = password                     # make_users bu değeri kullanır (kaynak koddaki sabit değil)
     make_users(url, (("ui_admin", "admin", None), ("ui_user", os.environ.get("UI_USER_ROLE", "user"), None),
                      ("ui_viewer", "viewer", None)))
     env = dict(os.environ, DATABASE_URL=url, DATA_DIR=data_dir, ACTIVE_WINDOW_SEC="3600", INGEST_TOKEN="")

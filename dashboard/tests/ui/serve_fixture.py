@@ -1,6 +1,8 @@
-"""Tarayıcı UI testleri için İZOLE dashboard örnekleri (ana DB'ye dokunmaz). tests servisinde çalışır:
+"""Tarayıcı UI testleri için İZOLE dashboard örnekleri (ana DB'ye dokunmaz). tests servisinde çalışır.
+UI_PASSWORD: bu izole veritabanları için geçici parola (en az 12 karakter), ui_check.mjs ile AYNI olmalı:
 
-    docker compose --profile test run --rm -d -p 127.0.0.1:8001:8001 -p 127.0.0.1:8002:8002 -p 127.0.0.1:8003:8003 \\
+    docker compose --profile test run --rm -d -e UI_PASSWORD=<geçici parola> \\
+        -p 127.0.0.1:8001:8001 -p 127.0.0.1:8002:8002 -p 127.0.0.1:8003:8003 \\
         tests sh -c "pip install -q -r requirements-dev.txt && python -m tests.ui.serve_fixture"
 
 :8001  ppe_ui_test       — tüm durumlar (closed/active/stale/run_end/orphan/unknown), eski kayıt, XSS adı, 60+ satır
@@ -97,15 +99,21 @@ def seed(url, data_dir):
     make_users(url, (("ui_admin", "admin", None), ("ui_viewer", "viewer", None), ("ui_cam1", "supervisor", ["cam1"])))
 
 
-UI_PASSWORD = "Ui-Test-Parola-2026"      # yalnız izole UI test veritabanları
+def ui_password():
+    """UI test hesaplarının parolası UI_PASSWORD ortam değişkeninden gelir (kaynak kodda sabit parola yok)."""
+    p = os.environ.get("UI_PASSWORD", "")
+    if len(p) < 12:
+        sys.exit("UI_PASSWORD ortam değişkeni gerekli (en az 12 karakter; yalnız bu izole test veritabanları için)")
+    return p
 
 
 def make_users(url, users):
     from auth import store
     from db.session import get_session
+    password = ui_password()
     with get_session(url) as s, s.begin():
         for name, role, cams in users:
-            store.create_user(s, name, UI_PASSWORD, role, cams)
+            store.create_user(s, name, password, role, cams)
 
 
 def main():
