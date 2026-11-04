@@ -618,10 +618,10 @@ async function tick() {
     const running = d.cameras.filter(c => c.meta.status === "running").length;
     const c = $("conn");
     let cls = "", txt;
-    if (!d.cameras.length) { txt = "Dedektör bağlı değil (PC'de detector.py çalıştır)"; cls = "err"; }
+    if (!d.cameras.length) { txt = "Dedektör bağlı değil"; cls = "err"; }
     else if (running) {
       const down = d.cameras.filter(camDown).length;
-      txt = `Canlı · ${running}/${d.cameras.length} kamera` + (down ? ` · ${down} kamera İZLENEMİYOR` : "");
+      txt = "Dedektör bağlı" + (down ? ` · ${down} kamera İZLENEMİYOR` : "");
       cls = down ? "err" : "live";
     }
     else if (d.cameras.every(x => x.meta.status === "finished")) { txt = "Videolar bitti"; }
