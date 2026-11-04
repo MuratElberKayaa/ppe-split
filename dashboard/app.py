@@ -532,13 +532,27 @@ async def ws_feed(ws: WebSocket):
         ops.REG.ws_event("closed")
 
 
-def _mjpeg(cam: Cam):
+def _stream_allowed(request: Request, cid: str) -> bool:
+    """Açık MJPEG akışında oturum geçerli, rol supervisor+ ve kamera kapsamda mı doğrular."""
+    try:
+        ctx = security.authenticate(request)
+    except HTTPException:                      # DB erişilemiyor: /ws ile aynı davranış, akış kapanır
+        return False
+    return ctx is not None and ctx.at_least("supervisor") and ctx.camera_ok(cid)
+
+
+def _mjpeg(cam: Cam, request: Request, cid: str):
     def gen():
         last = -1
+        recheck = time.monotonic() + WS_RECHECK_SEC       # /ws ile aynı aralık: iptal ve rol düşürme akışı keser
         while True:
             with cam.cond:
                 cam.cond.wait_for(lambda: cam.frame_no != last, timeout=5)
                 jpg, last = cam.jpeg, cam.frame_no
+            if time.monotonic() >= recheck:
+                recheck = time.monotonic() + WS_RECHECK_SEC
+                if not _stream_allowed(request, cid):
+                    return
             if jpg is None:
                 continue
             yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
@@ -547,12 +561,12 @@ def _mjpeg(cam: Cam):
 
 
 @app.get("/video_feed/{cid}")
-def video_feed(cid: str, ctx: AuthCtx = Depends(require("supervisor"))):
+def video_feed(cid: str, request: Request, ctx: AuthCtx = Depends(require("supervisor"))):
     with LOCK:
         cam = CAMS.get(cid)
     if cam is None or not ctx.camera_ok(cid):
         raise HTTPException(status_code=404, detail="no such camera")
-    return _mjpeg(cam)
+    return _mjpeg(cam, request, cid)
 
 
 def _meta(c: Cam):

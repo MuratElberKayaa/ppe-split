@@ -37,7 +37,7 @@ Kapsam dışı kayıt **404** döner (varlığı açığa vurulmaz).
 | `/snapshots/{alert_<uuid>.jpg}` | ✗ 401 | ✗ 403 | ✓ kapsam | ✓ kapsam | yalnız DB'de referansı olan dosya; erişim denetlenir |
 | `/api/state`, `/api/alerts`, `/api/report` | ✗ 401 | ✗ 403 | ✓ kapsam | ✓ kapsam | |
 | `/ws` | ✗ | ✗ | ✓ kapsam | ✓ kapsam | aynı köken; ~15 sn'de oturum yeniden doğrulanır |
-| `/video_feed/{cid}` | ✗ 401 | ✗ 403 | ✓ kapsam | ✓ kapsam | |
+| `/video_feed/{cid}` | ✗ 401 | ✗ 403 | ✓ kapsam | ✓ kapsam | açık akışta oturum ~15 sn'de yeniden doğrulanır (`/ws` ile aynı `WS_RECHECK_SEC`); çıkış, iptal, hesap kapatma ve rol/kapsam düşürme akışı keser |
 | `/api/admin/*` | ✗ 401 | ✗ 403 | ✗ 403 | ✓ | yazma: CSRF; son etkin yönetici korunur |
 | `/ingest/frame`, `/ingest/report` | yalnız `X-Token` | | | | oturum çerezi dikkate alınmaz |
 | `/docs`, `/redoc`, `/openapi.json` | 404 | | | | kapalı |
